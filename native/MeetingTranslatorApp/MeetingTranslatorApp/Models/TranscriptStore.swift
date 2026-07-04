@@ -1,0 +1,77 @@
+import Foundation
+
+struct TranscriptEntry: Identifiable, Codable {
+    let id: UUID
+    let timestamp: Date
+    let original: String
+    let chinese: String
+
+    init(id: UUID = UUID(), timestamp: Date = Date(), original: String, chinese: String) {
+        self.id = id
+        self.timestamp = timestamp
+        self.original = original
+        self.chinese = chinese
+    }
+}
+
+@MainActor
+final class TranscriptStore: ObservableObject {
+    @Published var entries: [TranscriptEntry] = []
+
+    private let fileURL: URL
+
+    init() {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appDir = appSupport.appendingPathComponent("EchoMeet", isDirectory: true)
+        try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
+        fileURL = appDir.appendingPathComponent("transcript.json")
+        loadFromDisk()
+    }
+
+    func add(original: String, chinese: String) {
+        let entry = TranscriptEntry(original: original, chinese: chinese)
+        entries.append(entry)
+        saveToDisk()
+    }
+
+    func clear() {
+        entries.removeAll()
+        saveToDisk()
+    }
+
+    private func saveToDisk() {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = .prettyPrinted
+        if let data = try? encoder.encode(entries) {
+            try? data.write(to: fileURL)
+        }
+    }
+
+    private func loadFromDisk() {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        if let data = try? Data(contentsOf: fileURL),
+           let loaded = try? decoder.decode([TranscriptEntry].self, from: data) {
+            entries = loaded
+        }
+    }
+
+    func exportMarkdown() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        var lines = ["# Meeting Transcript", ""]
+        for entry in entries {
+            lines.append("## \(formatter.string(from: entry.timestamp))")
+            lines.append("")
+            lines.append("**中文:** \(entry.chinese)")
+            lines.append("")
+            lines.append("**Original:** \(entry.original)")
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+        }
+        return lines.joined(separator: "\n")
+    }
+}

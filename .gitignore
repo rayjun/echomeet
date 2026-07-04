@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+.env
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Swift / SPM
+.build/
+.swiftpm/
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# App bundle (build artifact)
+*.app/
+
+# Transcripts (runtime data, may contain private meeting content)
+transcripts/
+
+# Icon working files
+native/EchoMeet.iconset/
+native/icon_1024.png
+native/EchoMeet-Logo-Blue.html
+native/EchoMeet-Logo.html
+
+# Logs
+*.log

@@ -1,0 +1,27 @@
+[project]
+name = "meeting-translator"
+version = "0.1.0"
+description = "Realtime meeting transcription and Chinese translation for microphone plus computer audio inputs."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26",
+  "sounddevice>=0.4.6",
+  "soundfile>=0.12.1",
+  "faster-whisper>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+meeting-translator = "meeting_translator.cli:main"
+meeting-translator-panel = "meeting_translator.panel:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
