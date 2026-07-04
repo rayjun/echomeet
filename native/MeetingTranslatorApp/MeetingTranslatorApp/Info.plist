@@ -14,8 +14,6 @@
     <string>1.0.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
-    <key>CFBundleExecutable</key>
-    <string>MeetingTranslatorApp</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSMicrophoneUsageDescription</key>

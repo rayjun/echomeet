@@ -21,41 +21,67 @@ struct SettingsView: View {
     ]
 
     var body: some View {
-        Form {
-            Section("语音识别") {
-                Picker("识别语言", selection: $selectedLocale) {
-                    ForEach(locales, id: \.0) { code, name in
-                        Text(name).tag(code)
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("设置")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    NSApp.keyWindow?.close()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+
+            Divider()
+
+            Form {
+                Section("语音识别") {
+                    Picker("识别语言", selection: $selectedLocale) {
+                        ForEach(locales, id: \.0) { code, name in
+                            Text(name).tag(code)
+                        }
+                    }
+                    if let err = speechRecognizer.errorMessage {
+                        Text(err).foregroundColor(.red).font(.caption)
                     }
                 }
-                if let err = speechRecognizer.errorMessage {
-                    Text(err).foregroundColor(.red).font(.caption)
-                }
-            }
 
-            Section("翻译 API") {
-                SecureField("API Key", text: $apiKeyInput)
-                TextField("Base URL", text: $baseURLInput)
-                TextField("Model", text: $modelInput)
-                if let err = translator.errorMessage {
-                    Text(err).foregroundColor(.red).font(.caption)
+                Section("翻译 API") {
+                    SecureField("API Key", text: $apiKeyInput)
+                    TextField("Base URL", text: $baseURLInput)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Model", text: $modelInput)
+                        .textFieldStyle(.roundedBorder)
+                    if let err = translator.errorMessage {
+                        Text(err).foregroundColor(.red).font(.caption)
+                    }
                 }
-            }
 
-            Section {
-                Button("保存设置") {
-                    translator.apiKey = apiKeyInput
-                    translator.baseURL = baseURLInput.isEmpty ? "https://api.openai.com/v1/chat/completions" : baseURLInput
-                    translator.model = modelInput.isEmpty ? "gpt-4o-mini" : modelInput
-                    UserDefaults.standard.set(apiKeyInput, forKey: "apiKey")
-                    UserDefaults.standard.set(translator.baseURL, forKey: "baseURL")
-                    UserDefaults.standard.set(translator.model, forKey: "model")
-                    UserDefaults.standard.set(selectedLocale, forKey: "locale")
+                Section {
+                    Button {
+                        translator.apiKey = apiKeyInput
+                        translator.baseURL = baseURLInput.isEmpty ? "https://api.openai.com/v1/chat/completions" : baseURLInput
+                        translator.model = modelInput.isEmpty ? "gpt-4o-mini" : modelInput
+                        UserDefaults.standard.set(apiKeyInput, forKey: "apiKey")
+                        UserDefaults.standard.set(translator.baseURL, forKey: "baseURL")
+                        UserDefaults.standard.set(translator.model, forKey: "model")
+                        UserDefaults.standard.set(selectedLocale, forKey: "locale")
+                    } label: {
+                        Label("保存设置", systemImage: "checkmark.circle.fill")
+                    }
+                    .tint(.echoBlue)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
+            .formStyle(.grouped)
         }
-        .formStyle(.grouped)
-        .frame(width: 480, height: 360)
+        .frame(width: 500, height: 400)
         .onAppear {
             apiKeyInput = UserDefaults.standard.string(forKey: "apiKey") ?? ""
             baseURLInput = UserDefaults.standard.string(forKey: "baseURL") ?? "https://api.openai.com/v1/chat/completions"
