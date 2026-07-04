@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct SettingsView: View {
     @ObservedObject var translator: Translator
@@ -22,23 +23,29 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
+            // Header with blue gradient
             HStack {
-                Text("设置")
-                    .font(.headline)
+                HStack(spacing: 8) {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.white)
+                    Text("设置")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                }
                 Spacer()
                 Button {
                     NSApp.keyWindow?.close()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 16))
+                        .foregroundColor(.white.opacity(0.8))
                 }
                 .buttonStyle(.borderless)
             }
             .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-
-            Divider()
+            .padding(.vertical, 14)
+            .background(LinearGradient.echoBlueGradient)
 
             Form {
                 Section("语音识别") {
@@ -55,9 +62,7 @@ struct SettingsView: View {
                 Section("翻译 API") {
                     SecureField("API Key", text: $apiKeyInput)
                     TextField("Base URL", text: $baseURLInput)
-                        .textFieldStyle(.roundedBorder)
                     TextField("Model", text: $modelInput)
-                        .textFieldStyle(.roundedBorder)
                     if let err = translator.errorMessage {
                         Text(err).foregroundColor(.red).font(.caption)
                     }
@@ -81,7 +86,8 @@ struct SettingsView: View {
             }
             .formStyle(.grouped)
         }
-        .frame(width: 500, height: 400)
+        .frame(width: 500, height: 420)
+        .tint(.echoBlue)
         .onAppear {
             apiKeyInput = UserDefaults.standard.string(forKey: "apiKey") ?? ""
             baseURLInput = UserDefaults.standard.string(forKey: "baseURL") ?? "https://api.openai.com/v1/chat/completions"

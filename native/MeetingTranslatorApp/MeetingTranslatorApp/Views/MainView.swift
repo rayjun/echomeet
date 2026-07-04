@@ -3,9 +3,21 @@ import AppKit
 
 // MARK: - Accent Color
 extension Color {
-    static let echoBlue = Color(red: 0.35, green: 0.62, blue: 0.95)
-    static let echoBlueLight = Color(red: 0.35, green: 0.62, blue: 0.95).opacity(0.12)
-    static let echoBlueMedium = Color(red: 0.35, green: 0.62, blue: 0.95).opacity(0.25)
+    static let echoBlue = Color(red: 0.25, green: 0.57, blue: 0.92)
+    static let echoBlueDeep = Color(red: 0.20, green: 0.50, blue: 0.85)
+    static let echoBlueLight = Color(red: 0.25, green: 0.57, blue: 0.92).opacity(0.10)
+    static let echoBlueMedium = Color(red: 0.25, green: 0.57, blue: 0.92).opacity(0.20)
+    static let echoSwitchOn = Color(red: 0.70, green: 0.85, blue: 1.0)
+    static let echoStop = Color(red: 0.15, green: 0.30, blue: 0.50)
+    static let echoRecording = Color(red: 0.90, green: 0.60, blue: 0.20)
+}
+
+extension LinearGradient {
+    static let echoBlueGradient = LinearGradient(
+        colors: [Color(red: 0.25, green: 0.57, blue: 0.92), Color(red: 0.20, green: 0.50, blue: 0.85)],
+        startPoint: .leading,
+        endPoint: .trailing
+    )
 }
 
 struct MainView: View {
@@ -21,64 +33,88 @@ struct MainView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Native toolbar style
-            HStack(spacing: 12) {
-                Toggle("麦克风", isOn: $includeMic)
-                    .disabled(captureManager.isCapturing)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-
-                Toggle("翻译", isOn: $enableTranslation)
-                    .disabled(captureManager.isCapturing)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
+            // Header bar with blue gradient
+            HStack(spacing: 16) {
+                // App title
+                HStack(spacing: 8) {
+                    Image(systemName: "waveform.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(.white)
+                    Text("EchoMeet")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                }
 
                 Spacer()
 
+                // Toggles
+                HStack(spacing: 16) {
+                    Toggle("麦克风", isOn: $includeMic)
+                        .disabled(captureManager.isCapturing)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .tint(Color.echoSwitchOn)
+                        .foregroundColor(.white)
+
+                    Toggle("翻译", isOn: $enableTranslation)
+                        .disabled(captureManager.isCapturing)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .tint(Color.echoSwitchOn)
+                        .foregroundColor(.white)
+                }
+
+                Divider()
+                    .frame(height: 20)
+                    .opacity(0.3)
+
+                // Record / Stop button
                 if captureManager.isCapturing {
                     Button {
                         stopCapture()
                     } label: {
                         Label("停止", systemImage: "stop.fill")
+                            .font(.system(size: 13, weight: .medium))
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .controlSize(.small)
+                    .tint(Color.echoStop)
+                    .controlSize(.regular)
                 } else {
                     Button {
                         startCapture()
                     } label: {
-                        Label("开始记录", systemImage: "record.circle.fill")
+                        Label("开始", systemImage: "record.circle.fill")
+                            .font(.system(size: 13, weight: .medium))
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.echoBlue)
-                    .controlSize(.small)
+                    .tint(Color.echoSwitchOn)
+                    .foregroundColor(.echoBlueDeep)
+                    .controlSize(.regular)
                 }
 
                 Button {
                     showSettings = true
                 } label: {
-                    Image(systemName: "gearshape")
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.white.opacity(0.9))
                 }
                 .buttonStyle(.borderless)
-                .controlSize(.small)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-
-            Divider()
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(LinearGradient.echoBlueGradient)
 
             // Status bar
             HStack(spacing: 8) {
                 if captureManager.isCapturing {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 5) {
                         Circle()
-                            .fill(.red)
-                            .frame(width: 6, height: 6)
-                            .opacity(0.8)
+                            .fill(Color.echoRecording)
+                            .frame(width: 7, height: 7)
                         Text("录制中")
                             .font(.caption)
-                            .foregroundColor(.red)
+                            .foregroundColor(.echoRecording)
                     }
                 }
                 if let err = captureManager.errorMessage {
@@ -93,32 +129,33 @@ struct MainView: View {
                     .foregroundColor(.secondary)
                     .monospacedDigit()
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+            .background(Color.echoBlueLight)
 
             Divider()
 
             // Live transcript area
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     if transcriptStore.entries.isEmpty && speechRecognizer.currentText.isEmpty {
-                        VStack(spacing: 12) {
+                        VStack(spacing: 16) {
                             Image(systemName: "waveform.circle")
-                                .font(.system(size: 40))
+                                .font(.system(size: 48))
                                 .foregroundColor(.echoBlue)
-                                .opacity(0.6)
+                                .opacity(0.5)
                             Text("点击「开始记录」捕获系统音频和麦克风")
                                 .foregroundColor(.secondary)
                                 .font(.callout)
                         }
-                        .padding(.vertical, 60)
+                        .padding(.vertical, 80)
                         .frame(maxWidth: .infinity)
                     }
 
                     // Current live text
                     if !speechRecognizer.currentText.isEmpty && captureManager.isCapturing {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 4) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 5) {
                                 Image(systemName: "dot.radiowaves.left.and.right")
                                     .font(.caption)
                                     .foregroundColor(.echoBlue)
@@ -128,9 +165,13 @@ struct MainView: View {
                             }
                             Text(speechRecognizer.currentText)
                                 .font(.body)
-                                .padding(10)
-                                .background(Color.echoBlueLight)
-                                .cornerRadius(8)
+                                .padding(12)
+                                .background(Color.echoBlueMedium)
+                                .cornerRadius(10)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color.echoBlue.opacity(0.3), lineWidth: 1)
+                                )
                         }
                     }
 
@@ -140,7 +181,7 @@ struct MainView: View {
                             .id(entry.id)
                     }
                 }
-                .padding(16)
+                .padding(20)
             }
 
             Divider()
@@ -166,13 +207,15 @@ struct MainView: View {
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
+                .tint(.echoBlue)
                 .controlSize(.small)
                 .disabled(transcriptStore.entries.isEmpty)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
         }
         .frame(minWidth: 600, minHeight: 450)
+        .tint(.echoBlue)
         .sheet(isPresented: $showSettings) {
             SettingsView(translator: translator, speechRecognizer: speechRecognizer)
         }
@@ -246,11 +289,16 @@ struct TranscriptEntryView: View {
     private let fmt: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f }()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(fmt.string(from: entry.timestamp))
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .monospacedDigit()
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "clock.fill")
+                    .font(.system(size: 9))
+                    .foregroundColor(.echoBlue)
+                Text(fmt.string(from: entry.timestamp))
+                    .font(.caption)
+                    .foregroundColor(.echoBlue)
+                    .monospacedDigit()
+            }
             if !entry.chinese.isEmpty {
                 Text(entry.chinese)
                     .font(.body)
@@ -260,9 +308,13 @@ struct TranscriptEntryView: View {
                 .font(.callout)
                 .foregroundColor(.secondary)
         }
-        .padding(12)
+        .padding(14)
         .background(Color.echoBlueLight)
         .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.echoBlue.opacity(0.15), lineWidth: 1)
+        )
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
