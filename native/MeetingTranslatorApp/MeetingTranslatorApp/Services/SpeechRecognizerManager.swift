@@ -23,6 +23,9 @@ final class SpeechRecognizerManager: ObservableObject {
 
     private var lastSavedText: String = ""
     private var currentTranscript: String = ""
+    private var lastResultText: String = ""
+    private var resultStableCount: Int = 0
+    private var stableThreshold: Int = 3
 
     private let fillerWords: Set<String> = [
         "um", "uh", "er", "ah", "hmm", "mm",
@@ -263,13 +266,34 @@ final class SpeechRecognizerManager: ObservableObject {
         guard !cleaned.isEmpty else { return }
 
         currentText = cleaned
-        logToFile("Result: \"\(cleaned.prefix(80))\"")
 
-        // Check for sentence-ending punctuation
-        if let split = checkSentenceSplit(cleaned) {
-            saveSentence(split)
-        } else if cleaned.count >= 80 {
-            saveSentence(cleaned)
+        // Track result stability — progressive transcription sends
+        // multiple updates for the same audio; only save when stable
+        if cleaned == lastResultText {
+            resultStableCount += 1
+        } else {
+            lastResultText = cleaned
+            resultStableCount = 0
+        }
+
+        // Save when:
+        // 1. Result has been stable for N consecutive callbacks, OR
+        // 2. Sentence-ending punctuation detected with enough content, OR
+        // 3. Text is getting too long
+        if resultStableCount >= stableThreshold {
+            if !cleaned.isEmpty && cleaned != lastSavedText {
+                saveSentence(cleaned)
+            }
+            resultStableCount = 0
+        } else if let split = checkSentenceSplit(cleaned) {
+            // Punctuation-based split — but only save if different from last
+            if split != lastSavedText {
+                saveSentence(split)
+            }
+        } else if cleaned.count >= 120 {
+            if cleaned != lastSavedText {
+                saveSentence(cleaned)
+            }
         }
     }
 
