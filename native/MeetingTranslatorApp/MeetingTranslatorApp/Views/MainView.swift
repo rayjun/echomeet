@@ -125,7 +125,7 @@ struct MainView: View {
                     Text(err).foregroundColor(.red).font(.caption)
                 }
                 Spacer()
-                Text("\(transcriptStore.entries.count) 条记录 · \(captureManager.audioFrameCount) 音频帧")
+                Text("\(transcriptStore.entries.count) 条记录")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .monospacedDigit()
