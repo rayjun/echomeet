@@ -5,12 +5,14 @@ struct TranscriptEntry: Identifiable, Codable {
     let timestamp: Date
     let original: String
     let chinese: String
+    let speaker: Int
 
-    init(id: UUID = UUID(), timestamp: Date = Date(), original: String, chinese: String) {
+    init(id: UUID = UUID(), timestamp: Date = Date(), original: String, chinese: String, speaker: Int = 1) {
         self.id = id
         self.timestamp = timestamp
         self.original = original
         self.chinese = chinese
+        self.speaker = speaker
     }
 }
 
@@ -28,8 +30,8 @@ final class TranscriptStore: ObservableObject {
         loadFromDisk()
     }
 
-    func add(original: String, chinese: String) {
-        let entry = TranscriptEntry(original: original, chinese: chinese)
+    func add(original: String, chinese: String, speaker: Int = 1) {
+        let entry = TranscriptEntry(original: original, chinese: chinese, speaker: speaker)
         entries.append(entry)
         saveToDisk()
     }
@@ -63,7 +65,7 @@ final class TranscriptStore: ObservableObject {
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         var lines = ["# Meeting Transcript", ""]
         for entry in entries {
-            lines.append("## \(formatter.string(from: entry.timestamp))")
+            lines.append("## \(formatter.string(from: entry.timestamp)) — Speaker \(entry.speaker)")
             lines.append("")
             lines.append("**中文:** \(entry.chinese)")
             lines.append("")

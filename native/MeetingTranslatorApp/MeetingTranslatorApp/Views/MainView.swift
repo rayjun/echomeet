@@ -159,7 +159,7 @@ struct MainView: View {
                                 Image(systemName: "dot.radiowaves.left.and.right")
                                     .font(.caption)
                                     .foregroundColor(.echoBlue)
-                                Text("实时识别中")
+                                Text("Speaker \(speechRecognizer.currentSpeaker) · 实时识别中")
                                     .font(.caption)
                                     .foregroundColor(.echoBlue)
                             }
@@ -233,17 +233,17 @@ struct MainView: View {
             let locale = Locale(identifier: UserDefaults.standard.string(forKey: "locale") ?? "en-US")
             speechRecognizer.start(locale: locale)
 
-            speechRecognizer.onSentenceComplete = { sentence in
+            speechRecognizer.onSentenceComplete = { sentence, speaker in
                 Task {
                     if self.enableTranslation {
-                        self.translator.logToFile("Translating: \(sentence.prefix(60))")
+                        self.translator.logToFile("Translating [Speaker \(speaker)]: \(sentence.prefix(60))")
                         let chinese = await self.translator.translate(sentence) ?? ""
                         if chinese.isEmpty {
                             self.translator.logToFile("Translation returned empty")
                         }
-                        self.transcriptStore.add(original: sentence, chinese: chinese)
+                        self.transcriptStore.add(original: sentence, chinese: chinese, speaker: speaker)
                     } else {
-                        self.transcriptStore.add(original: sentence, chinese: "")
+                        self.transcriptStore.add(original: sentence, chinese: "", speaker: speaker)
                     }
                     self.lastTranslatedText = sentence
                 }
@@ -288,32 +288,51 @@ struct TranscriptEntryView: View {
     let entry: TranscriptEntry
     private let fmt: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f }()
 
+    private var speakerColor: Color {
+        entry.speaker == 1 ? .echoBlue : Color(red: 0.55, green: 0.35, blue: 0.80)
+    }
+
+    private var speakerInitial: String {
+        entry.speaker == 1 ? "A" : "B"
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "clock.fill")
-                    .font(.system(size: 9))
-                    .foregroundColor(.echoBlue)
-                Text(fmt.string(from: entry.timestamp))
-                    .font(.caption)
-                    .foregroundColor(.echoBlue)
-                    .monospacedDigit()
+        HStack(alignment: .top, spacing: 10) {
+            // Speaker avatar circle
+            Text(speakerInitial)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 24, height: 24)
+                .background(speakerColor)
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text("Speaker \(entry.speaker)")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(speakerColor)
+                    Text(fmt.string(from: entry.timestamp))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .monospacedDigit()
+                }
+                if !entry.chinese.isEmpty {
+                    Text(entry.chinese)
+                        .font(.body)
+                        .foregroundColor(.primary)
+                }
+                Text(entry.original)
+                    .font(.callout)
+                    .foregroundColor(.secondary)
             }
-            if !entry.chinese.isEmpty {
-                Text(entry.chinese)
-                    .font(.body)
-                    .foregroundColor(.primary)
-            }
-            Text(entry.original)
-                .font(.callout)
-                .foregroundColor(.secondary)
         }
         .padding(14)
         .background(Color.echoBlueLight)
         .cornerRadius(10)
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.echoBlue.opacity(0.15), lineWidth: 1)
+                .stroke(speakerColor.opacity(0.2), lineWidth: 1)
         )
         .frame(maxWidth: .infinity, alignment: .leading)
     }
