@@ -28,6 +28,8 @@ final class SpeechRecognizerManager: ObservableObject {
     private var resultStableCount: Int = 0
     private var stableThreshold: Int = 3
     private var savedSentenceRange: CMTimeRange?
+    private var lastReviseTime: Date = .distantPast
+    private let reviseThrottle: Double = 1.5
 
     private let fillerWords: Set<String> = [
         "um", "uh", "er", "ah", "hmm", "mm",
@@ -283,6 +285,17 @@ final class SpeechRecognizerManager: ObservableObject {
         let overlaps = savedSentenceRange != nil && CMTimeRangeGetIntersection(range, otherRange: savedSentenceRange!).duration.value > 0
 
         if overlaps && !cleaned.isEmpty {
+            // If result is stable, force the final revision (bypass throttle)
+            if resultStableCount >= stableThreshold {
+                lastReviseTime = Date()
+                lastSavedText = cleaned
+                savedSentenceRange = range
+                logToFile("Final revised: \(cleaned.prefix(80))")
+                onSentenceRevise?(cleaned, currentSpeaker)
+                currentText = ""
+                resultStableCount = 0
+                return
+            }
             // This is a revision of the previously saved sentence
             replaceLastSentence(cleaned, range: range)
             return
@@ -317,7 +330,19 @@ final class SpeechRecognizerManager: ObservableObject {
             return
         }
 
-        // Update the last saved text and notify
+        // Throttle revisions: only send the first revision immediately,
+        // then at most once per reviseThrottle seconds.
+        // The final revision (when result is stable) will be sent by saveSentence.
+        let now = Date()
+        let elapsed = now.timeIntervalSince(lastReviseTime)
+        
+        if elapsed < reviseThrottle {
+            // Too soon — just update currentText, don't trigger revision yet
+            currentText = sentence
+            return
+        }
+
+        lastReviseTime = now
         lastSavedText = sentence
         savedSentenceRange = range
         logToFile("Revised: \(sentence.prefix(80))")
