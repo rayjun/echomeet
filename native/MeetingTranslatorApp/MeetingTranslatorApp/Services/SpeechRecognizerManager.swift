@@ -124,7 +124,7 @@ final class SpeechRecognizerManager: ObservableObject {
 
         logToFile("Using locale: \(actualLocale.identifier) (requested: \(locale.identifier))")
 
-        let transcriber = SpeechTranscriber(locale: actualLocale, preset: .transcription)
+        let transcriber = SpeechTranscriber(locale: actualLocale, preset: .progressiveTranscription)
         self.transcriber = transcriber
 
         // Create SpeechAnalyzer with the transcriber module
@@ -270,25 +270,25 @@ final class SpeechRecognizerManager: ObservableObject {
         let cleaned = cleanText(text)
         guard !cleaned.isEmpty else { return }
 
+        // Always update currentText for live display
         currentText = cleaned
 
-        // In .transcription mode, results are final — save immediately
-        // Dedup against lastSavedText to avoid identical consecutive results
-        if cleaned == lastSavedText {
+        // In progressive mode, results continuously expand and revise.
+        // Strategy: only save when we see sentence-ending punctuation,
+        // and dedup by checking if the new text starts with or equals last saved.
+        // Skip if this is just a prefix/revision of something we already saved.
+        if !lastSavedText.isEmpty && (cleaned == lastSavedText || lastSavedText.hasPrefix(cleaned) || cleaned.hasPrefix(lastSavedText)) {
+            // This is a progressive revision of the same content — update display only
             return
         }
 
+        // Save on sentence-ending punctuation
         if let split = checkSentenceSplit(cleaned) {
-            if split != lastSavedText {
+            if split != lastSavedText && !lastSavedText.contains(split) {
                 saveSentence(split, range: range)
             }
         } else if cleaned.count >= 120 {
             if cleaned != lastSavedText {
-                saveSentence(cleaned, range: range)
-            }
-        } else {
-            // Shorter text — save directly (non-progressive mode gives complete sentences)
-            if !cleaned.isEmpty && cleaned != lastSavedText {
                 saveSentence(cleaned, range: range)
             }
         }
