@@ -124,7 +124,7 @@ final class SpeechRecognizerManager: ObservableObject {
 
         logToFile("Using locale: \(actualLocale.identifier) (requested: \(locale.identifier))")
 
-        let transcriber = SpeechTranscriber(locale: actualLocale, preset: .progressiveTranscription)
+        let transcriber = SpeechTranscriber(locale: actualLocale, preset: .transcription)
         self.transcriber = transcriber
 
         // Create SpeechAnalyzer with the transcriber module
@@ -272,30 +272,23 @@ final class SpeechRecognizerManager: ObservableObject {
 
         currentText = cleaned
 
-        // Track result stability
-        if cleaned == lastResultText {
-            resultStableCount += 1
-        } else {
-            lastResultText = cleaned
-            resultStableCount = 0
+        // In .transcription mode, results are final — save immediately
+        // Dedup against lastSavedText to avoid identical consecutive results
+        if cleaned == lastSavedText {
+            return
         }
 
-        // Save when:
-        // 1. Result has been stable for N consecutive callbacks, OR
-        // 2. Sentence-ending punctuation detected with enough content, OR
-        // 3. Text is getting too long
-        // Always check against lastSavedText to avoid duplicates
-        if resultStableCount >= stableThreshold {
-            if !cleaned.isEmpty && cleaned != lastSavedText {
-                saveSentence(cleaned, range: range)
-            }
-            resultStableCount = 0
-        } else if let split = checkSentenceSplit(cleaned) {
+        if let split = checkSentenceSplit(cleaned) {
             if split != lastSavedText {
                 saveSentence(split, range: range)
             }
         } else if cleaned.count >= 120 {
             if cleaned != lastSavedText {
+                saveSentence(cleaned, range: range)
+            }
+        } else {
+            // Shorter text — save directly (non-progressive mode gives complete sentences)
+            if !cleaned.isEmpty && cleaned != lastSavedText {
                 saveSentence(cleaned, range: range)
             }
         }
