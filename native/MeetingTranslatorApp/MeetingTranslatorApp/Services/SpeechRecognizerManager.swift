@@ -285,17 +285,6 @@ final class SpeechRecognizerManager: ObservableObject {
         let overlaps = savedSentenceRange != nil && CMTimeRangeGetIntersection(range, otherRange: savedSentenceRange!).duration.value > 0
 
         if overlaps && !cleaned.isEmpty {
-            // If result is stable, force the final revision (bypass throttle)
-            if resultStableCount >= stableThreshold {
-                lastReviseTime = Date()
-                lastSavedText = cleaned
-                savedSentenceRange = range
-                logToFile("Final revised: \(cleaned.prefix(80))")
-                onSentenceRevise?(cleaned, currentSpeaker)
-                currentText = ""
-                resultStableCount = 0
-                return
-            }
             // This is a revision of the previously saved sentence
             replaceLastSentence(cleaned, range: range)
             return
@@ -325,24 +314,16 @@ final class SpeechRecognizerManager: ObservableObject {
         let sentence = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !sentence.isEmpty else { return }
 
-        // Filter short fragments
         if !shouldSave(sentence) {
             return
         }
 
-        // Throttle revisions: only send the first revision immediately,
-        // then at most once per reviseThrottle seconds.
-        // The final revision (when result is stable) will be sent by saveSentence.
-        let now = Date()
-        let elapsed = now.timeIntervalSince(lastReviseTime)
-        
-        if elapsed < reviseThrottle {
-            // Too soon — just update currentText, don't trigger revision yet
+        // Only revise if the text actually changed from what we last sent
+        guard sentence != lastSavedText else {
             currentText = sentence
             return
         }
 
-        lastReviseTime = now
         lastSavedText = sentence
         savedSentenceRange = range
         logToFile("Revised: \(sentence.prefix(80))")

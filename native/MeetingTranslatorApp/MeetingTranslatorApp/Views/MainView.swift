@@ -254,6 +254,8 @@ struct MainView: View {
             // Handle revision of the last sentence (progressive transcription correction)
             speechRecognizer.onSentenceRevise = { sentence, speaker in
                 Task {
+                    // Skip translation if text hasn't changed from last revision
+                    guard sentence != self.lastTranslatedText else { return }
                     if self.enableTranslation {
                         let chinese = await self.translator.translate(sentence) ?? ""
                         self.transcriptStore.replaceLast(original: sentence, chinese: chinese, speaker: speaker)
