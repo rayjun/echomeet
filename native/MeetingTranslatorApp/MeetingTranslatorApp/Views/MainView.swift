@@ -267,9 +267,9 @@ struct MainView: View {
             Task {
                 if enableTranslation {
                     let chinese = await translator.translate(finalText) ?? ""
-                    transcriptStore.add(original: finalText, chinese: chinese)
+                    transcriptStore.add(original: finalText, chinese: chinese, speaker: speechRecognizer.currentSpeaker)
                 } else {
-                    transcriptStore.add(original: finalText, chinese: "")
+                    transcriptStore.add(original: finalText, chinese: "", speaker: speechRecognizer.currentSpeaker)
                 }
                 lastTranslatedText = finalText
             }

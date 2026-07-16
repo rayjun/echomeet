@@ -364,13 +364,6 @@ final class SpeechRecognizerManager: ObservableObject {
         inputNode = nil
         converter = nil
 
-        // Save last text
-        if !currentText.isEmpty && currentText.count > 3 {
-            saveSentence(currentText, range: savedSentenceRange ?? CMTimeRange(start: .zero, duration: CMTime(seconds: 1, preferredTimescale: 600)))
-        }
-
-        analyzer = nil
-        transcriber = nil
         isRunning = false
         logToFile("Stopped")
     }
