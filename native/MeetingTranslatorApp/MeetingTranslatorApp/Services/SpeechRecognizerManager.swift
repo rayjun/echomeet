@@ -217,6 +217,8 @@ final class SpeechRecognizerManager: ObservableObject {
                 if let lastTime = lastTime {
                     try await analyzer.finalizeAndFinish(through: lastTime)
                 }
+            } catch is CancellationError {
+                // Normal when user clicks stop — don't show error
             } catch {
                 await MainActor.run {
                     self.logToFile("Analyze error: \(error)")
