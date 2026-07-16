@@ -251,6 +251,19 @@ struct MainView: View {
                 }
             }
 
+            // Handle revision of the last sentence (progressive transcription correction)
+            speechRecognizer.onSentenceRevise = { sentence, speaker in
+                Task {
+                    if self.enableTranslation {
+                        let chinese = await self.translator.translate(sentence) ?? ""
+                        self.transcriptStore.replaceLast(original: sentence, chinese: chinese, speaker: speaker)
+                    } else {
+                        self.transcriptStore.replaceLast(original: sentence, chinese: "", speaker: speaker)
+                    }
+                    self.lastTranslatedText = sentence
+                }
+            }
+
             // Note: AudioCaptureManager is no longer needed for speech recognition.
             // SpeechRecognizerManager uses its own AVAudioEngine internally.
             // We keep captureManager for the audio frame counter display only.

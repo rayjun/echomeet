@@ -12,6 +12,7 @@ final class SpeechRecognizerManager: ObservableObject {
     @Published var currentSpeaker: Int = 1
 
     var onSentenceComplete: ((String, Int) -> Void)?
+    var onSentenceRevise: ((String, Int) -> Void)?
 
     private var analyzer: SpeechAnalyzer?
     private var transcriber: SpeechTranscriber?
@@ -26,6 +27,7 @@ final class SpeechRecognizerManager: ObservableObject {
     private var lastResultText: String = ""
     private var resultStableCount: Int = 0
     private var stableThreshold: Int = 3
+    private var savedSentenceRange: CMTimeRange?
 
     private let fillerWords: Set<String> = [
         "um", "uh", "er", "ah", "hmm", "mm",
@@ -226,8 +228,9 @@ final class SpeechRecognizerManager: ObservableObject {
             do {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters)
+                    let range = result.range
                     await MainActor.run {
-                        self.handleResult(text)
+                        self.handleResult(text, range: range)
                     }
                 }
             } catch {
@@ -261,19 +264,28 @@ final class SpeechRecognizerManager: ObservableObject {
         return outputBuffer
     }
 
-    private func handleResult(_ text: String) {
+    private func handleResult(_ text: String, range: CMTimeRange) {
         let cleaned = cleanText(text)
         guard !cleaned.isEmpty else { return }
 
         currentText = cleaned
 
-        // Track result stability — progressive transcription sends
-        // multiple updates for the same audio; only save when stable
+        // Track result stability
         if cleaned == lastResultText {
             resultStableCount += 1
         } else {
             lastResultText = cleaned
             resultStableCount = 0
+        }
+
+        // If this result's time range overlaps with what we already saved,
+        // it's a correction of the same audio — replace, don't duplicate
+        let overlaps = savedSentenceRange != nil && CMTimeRangeGetIntersection(range, otherRange: savedSentenceRange!).duration.value > 0
+
+        if overlaps && !cleaned.isEmpty {
+            // This is a revision of the previously saved sentence
+            replaceLastSentence(cleaned, range: range)
+            return
         }
 
         // Save when:
@@ -282,19 +294,35 @@ final class SpeechRecognizerManager: ObservableObject {
         // 3. Text is getting too long
         if resultStableCount >= stableThreshold {
             if !cleaned.isEmpty && cleaned != lastSavedText {
-                saveSentence(cleaned)
+                saveSentence(cleaned, range: range)
             }
             resultStableCount = 0
         } else if let split = checkSentenceSplit(cleaned) {
-            // Punctuation-based split — but only save if different from last
             if split != lastSavedText {
-                saveSentence(split)
+                saveSentence(split, range: range)
             }
         } else if cleaned.count >= 120 {
             if cleaned != lastSavedText {
-                saveSentence(cleaned)
+                saveSentence(cleaned, range: range)
             }
         }
+    }
+
+    private func replaceLastSentence(_ text: String, range: CMTimeRange) {
+        let sentence = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sentence.isEmpty else { return }
+
+        // Filter short fragments
+        if !shouldSave(sentence) {
+            return
+        }
+
+        // Update the last saved text and notify
+        lastSavedText = sentence
+        savedSentenceRange = range
+        logToFile("Revised: \(sentence.prefix(80))")
+        onSentenceRevise?(sentence, currentSpeaker)
+        currentText = ""
     }
 
     private func cleanText(_ text: String) -> String {
@@ -327,19 +355,27 @@ final class SpeechRecognizerManager: ObservableObject {
         return nil
     }
 
-    private func saveSentence(_ text: String) {
-        let sentence = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !sentence.isEmpty, sentence != lastSavedText else { return }
-
+    private func shouldSave(_ sentence: String) -> Bool {
         let wordCount = sentence.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.count
         let isCJK = sentence.unicodeScalars.contains { $0.value > 0x3000 }
         if (!isCJK && wordCount < 3 && sentence.count < 10) || (isCJK && sentence.count < 5) {
             logToFile("Filtered short: \"\(sentence.prefix(40))\"")
+            return false
+        }
+        return true
+    }
+
+    private func saveSentence(_ text: String, range: CMTimeRange) {
+        let sentence = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sentence.isEmpty, sentence != lastSavedText else { return }
+
+        guard shouldSave(sentence) else {
             currentText = ""
             return
         }
 
         lastSavedText = sentence
+        savedSentenceRange = range
         logToFile("Sentence [Speaker \(currentSpeaker)]: \(sentence.prefix(120))")
         onSentenceComplete?(sentence, currentSpeaker)
         currentText = ""
@@ -361,7 +397,7 @@ final class SpeechRecognizerManager: ObservableObject {
 
         // Save last text
         if !currentText.isEmpty && currentText.count > 3 {
-            saveSentence(currentText)
+            saveSentence(currentText, range: savedSentenceRange ?? CMTimeRange(start: .zero, duration: CMTime(seconds: 1, preferredTimescale: 600)))
         }
 
         analyzer = nil

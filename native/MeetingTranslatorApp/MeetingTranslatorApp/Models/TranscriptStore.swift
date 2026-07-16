@@ -36,6 +36,22 @@ final class TranscriptStore: ObservableObject {
         saveToDisk()
     }
 
+    func replaceLast(original: String, chinese: String, speaker: Int = 1) {
+        guard !entries.isEmpty else {
+            add(original: original, chinese: chinese, speaker: speaker)
+            return
+        }
+        let last = entries.last!
+        entries[entries.count - 1] = TranscriptEntry(
+            id: last.id,
+            timestamp: last.timestamp,
+            original: original,
+            chinese: chinese,
+            speaker: speaker
+        )
+        saveToDisk()
+    }
+
     func clear() {
         entries.removeAll()
         saveToDisk()
