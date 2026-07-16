@@ -4,6 +4,7 @@ import AppKit
 struct SettingsView: View {
     @ObservedObject var translator: Translator
     @ObservedObject var speechRecognizer: SpeechRecognizerManager
+    @Environment(\.dismiss) private var dismiss
 
     @State private var apiKeyInput: String = ""
     @State private var baseURLInput: String = ""
@@ -35,7 +36,7 @@ struct SettingsView: View {
                 }
                 Spacer()
                 Button {
-                    NSApp.keyWindow?.close()
+                    dismiss()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 16))
