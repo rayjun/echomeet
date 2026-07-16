@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 
+@available(macOS 26.0, *)
 struct SettingsView: View {
     @ObservedObject var translator: Translator
     @ObservedObject var speechRecognizer: SpeechRecognizerManager

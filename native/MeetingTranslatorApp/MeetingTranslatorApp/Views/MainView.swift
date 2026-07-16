@@ -20,6 +20,7 @@ extension LinearGradient {
     )
 }
 
+@available(macOS 26.0, *)
 struct MainView: View {
     @ObservedObject var captureManager: AudioCaptureManager
     @ObservedObject var speechRecognizer: SpeechRecognizerManager
@@ -231,6 +232,7 @@ struct MainView: View {
             translator.model = UserDefaults.standard.string(forKey: "model") ?? "gpt-4o-mini"
 
             let locale = Locale(identifier: UserDefaults.standard.string(forKey: "locale") ?? "en-US")
+            // Start speech recognizer (it manages its own AVAudioEngine for mic input)
             speechRecognizer.start(locale: locale)
 
             speechRecognizer.onSentenceComplete = { sentence, speaker in
@@ -249,15 +251,16 @@ struct MainView: View {
                 }
             }
 
-            captureManager.startCapture(includeMic: includeMic) { audioData in
-                speechRecognizer.feedAudioData(audioData)
-            }
+            // Note: AudioCaptureManager is no longer needed for speech recognition.
+            // SpeechRecognizerManager uses its own AVAudioEngine internally.
+            // We keep captureManager for the audio frame counter display only.
+            self.captureManager.isCapturing = true
         }
     }
 
     private func stopCapture() {
-        captureManager.stopCapture()
         speechRecognizer.stop()
+        captureManager.isCapturing = false
 
         let finalText = speechRecognizer.currentText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !finalText.isEmpty && finalText != lastTranslatedText {

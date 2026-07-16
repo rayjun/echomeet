@@ -1,6 +1,7 @@
 import SwiftUI
 
 @main
+@available(macOS 26.0, *)
 struct EchoMeetApp: App {
     @StateObject private var captureManager = AudioCaptureManager()
     @StateObject private var speechRecognizer = SpeechRecognizerManager()

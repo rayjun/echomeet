@@ -1,7 +1,9 @@
 import Foundation
-import Speech
 import AVFoundation
+import Speech
+import OSLog
 
+@available(macOS 26.0, *)
 @MainActor
 final class SpeechRecognizerManager: ObservableObject {
     @Published var currentText: String = ""
@@ -11,41 +13,23 @@ final class SpeechRecognizerManager: ObservableObject {
 
     var onSentenceComplete: ((String, Int) -> Void)?
 
-    private var speechRecognizer: SFSpeechRecognizer?
-    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var recognitionTask: SFSpeechRecognitionTask?
+    private var analyzer: SpeechAnalyzer?
+    private var transcriber: SpeechTranscriber?
+    private var audioEngine: AVAudioEngine?
+    private var inputNode: AVAudioInputNode?
+    private var analyzeTask: Task<Void, Never>?
+    private var resultTask: Task<Void, Never>?
+    private var converter: AVAudioConverter?
 
-    private var pendingPcmChunks: [Int16] = []
-    private var currentSampleRate: Int = 48000
-    private var chunkTimer: Timer?
-    private var lastSpeechTime: Date = .distantPast
-    private var restartDelay: Date = .distantPast
-    private var restartCount = 0
-    private var restartBackoff: Double = 0.3
     private var lastSavedText: String = ""
-
-    private var lastTextChangeTime: Date = .distantPast
-    private var lastTextContent: String = ""
-    private var consecutiveSilenceChunks: Int = 0
-    private var isSilenceFinalizing: Bool = false
-
-    private let silenceThreshold: Float = 0.006
-    private let silenceDurationToFinalize: Double = 1.8
-    private let textStallDurationToFinalize: Double = 2.0
-    private let maxSentenceLength: Int = 80
-    private let minMeaningfulWords: Int = 2
-
-    private let sentenceEnders: CharacterSet = {
-        var cs = CharacterSet(charactersIn: "。！？.!?\n\r；;")
-        cs.insert(charactersIn: "\u{3002}\u{FF01}\u{FF1F}\u{FF0C}")
-        return cs
-    }()
+    private var currentTranscript: String = ""
 
     private let fillerWords: Set<String> = [
-        "um", "uh", "er", "ah", "hmm", "mm", "uh-huh", "uh-huh",
-        "嗯", "啊", "呃", "哎", "那个", "这个", "就是", "然后",
-        "对吧", "的话", "一下", "其实", "基本上",
+        "um", "uh", "er", "ah", "hmm", "mm",
+        "嗯", "啊", "呃", "哎", "那个", "这个",
     ]
+
+    private let logger = Logger(subsystem: "com.rayjun.echomeet", category: "Speech")
 
     private func logToFile(_ message: String) {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -54,10 +38,17 @@ final class SpeechRecognizerManager: ObservableObject {
         let logURL = dir.appendingPathComponent("debug.log")
         let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         let line = "[\(ts)] [Speech] \(message)\n"
-        if let data = line.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: logURL.path) {
-                if let h = try? FileHandle(forWritingTo: logURL) { h.seekToEndOfFile(); h.write(data); h.closeFile() }
-            } else { try? data.write(to: logURL) }
+        guard let data = line.data(using: .utf8) else { return }
+        if FileManager.default.fileExists(atPath: logURL.path) {
+            if let h = try? FileHandle(forWritingTo: logURL) {
+                h.seekToEndOfFile()
+                h.write(data)
+                h.closeFile()
+            } else {
+                try? data.write(to: logURL, options: .atomic)
+            }
+        } else {
+            try? data.write(to: logURL, options: .atomic)
         }
     }
 
@@ -86,215 +77,218 @@ final class SpeechRecognizerManager: ObservableObject {
         return true
     }
 
-    func feedAudioData(_ audioData: AudioData) {
-        guard isRunning else { return }
-        currentSampleRate = audioData.sampleRate
-        pendingPcmChunks.append(contentsOf: audioData.samples)
-        let flushThreshold = Int(Double(audioData.sampleRate) * 0.1)
-        if pendingPcmChunks.count >= flushThreshold {
-            flushPendingChunks()
-        }
-    }
-
-    private func computeRMS(_ samples: [Int16]) -> Float {
-        guard !samples.isEmpty else { return 0 }
-        var sumSq: Float = 0
-        for s in samples {
-            let f = Float32(s) / Float32(Int16.max)
-            sumSq += f * f
-        }
-        return sqrt(sumSq / Float(samples.count))
-    }
-
-    private func flushPendingChunks() {
-        guard !pendingPcmChunks.isEmpty else { return }
-        let chunks = pendingPcmChunks
-        pendingPcmChunks.removeAll()
-
-        guard let recognitionRequest = recognitionRequest else { return }
-
-        let sampleRate = currentSampleRate
-        let samples = chunks
-        let frameCount = samples.count
-        guard frameCount > 0 else { return }
-
-        let rawRms = computeRMS(samples)
-        let now = Date()
-
-        if rawRms > silenceThreshold {
-            lastSpeechTime = now
-            consecutiveSilenceChunks = 0
-        } else {
-            consecutiveSilenceChunks += 1
-        }
-
-        let inHangover = now.timeIntervalSince(lastSpeechTime) < 0.4
-        if rawRms < silenceThreshold * 0.4 && !inHangover {
-            return
-        }
-
-        let targetRms: Float = 0.06
-        let gain = min(30.0, max(1.0, targetRms / max(rawRms, 0.001)))
-
-        let format = AVAudioFormat(standardFormatWithSampleRate: Double(sampleRate), channels: 1)!
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount)) else { return }
-        buffer.frameLength = AVAudioFrameCount(frameCount)
-
-        if let floatData = buffer.floatChannelData?[0] {
-            for (i, sample) in samples.enumerated() {
-                var f = Float32(sample) / Float32(Int16.max)
-                f *= gain
-                f = max(-1.0, min(1.0, f))
-                floatData[i] = f
-            }
-        }
-
-        recognitionRequest.append(buffer)
-    }
-
     func start(locale: Locale = Locale(identifier: "en-US")) {
         stop()
-        logToFile("Starting for locale: \(locale.identifier)")
-        speechRecognizer = SFSpeechRecognizer(locale: locale)
-        guard let recognizer = speechRecognizer, recognizer.isAvailable else {
-            logToFile("Not available")
-            errorMessage = "语音识别器不可用"
+        logToFile("Starting SpeechTranscriber for locale: \(locale.identifier)")
+
+        guard SpeechTranscriber.isAvailable else {
+            logToFile("SpeechTranscriber not available")
+            errorMessage = "SpeechTranscriber 不可用"
             return
         }
-
-        currentSpeaker = 1
-        startNewRecognitionTask(recognizer: recognizer)
 
         isRunning = true
         errorMessage = nil
-        logToFile("Started, isRunning=true")
+        currentSpeaker = 1
 
-        chunkTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self = self, self.isRunning else { return }
-                self.flushPendingChunks()
-                self.checkSilenceFinalization()
-
-                if self.recognitionTask == nil {
-                    let elapsed = Date().timeIntervalSince(self.restartDelay)
-                    if elapsed > self.restartBackoff {
-                        if let r = self.speechRecognizer, r.isAvailable {
-                            self.restartCount += 1
-                            self.restartBackoff = min(3.0, 0.3 * pow(2.0, Double(self.restartCount)))
-                            self.logToFile("Timer restart (count=\(self.restartCount), backoff=\(self.restartBackoff)s)")
-                            self.startNewRecognitionTask(recognizer: r)
-                        }
-                    }
-                }
-            }
+        // Find matching locale and start capture asynchronously
+        Task {
+            await self.setupAndStart(locale: locale)
         }
     }
 
-    private func checkSilenceFinalization() {
-        guard isRunning, !currentText.isEmpty, !isSilenceFinalizing else { return }
-
-        let now = Date()
-        let silenceSince = now.timeIntervalSince(lastSpeechTime)
-        let textStallSince = now.timeIntervalSince(lastTextChangeTime)
-
-        let hasRealSpeech = lastSpeechTime != .distantPast
-        let longSilence = hasRealSpeech && silenceSince > silenceDurationToFinalize
-        let textStalled = textStallSince > textStallDurationToFinalize && currentText == lastTextContent
-
-        if longSilence || textStalled {
-            logToFile("Finalizing: silenceSince=\(String(format: "%.1f", silenceSince))s, textStall=\(String(format: "%.1f", textStallSince))s")
-            let silenceGap = silenceSince
-            finalizeCurrentSentence(silenceGap: silenceGap)
+    private func setupAndStart(locale: Locale) async {
+        // Find a matching locale from supportedLocales
+        // macOS 26 uses underscore format (en_US) not hyphen format (en-US)
+        let supportedLocales = await SpeechTranscriber.supportedLocales
+        let matchingLocale = supportedLocales.first { loc in
+            loc.language.languageCode == locale.language.languageCode &&
+            loc.region == locale.region
+        } ?? supportedLocales.first { loc in
+            loc.language.languageCode == locale.language.languageCode
         }
+
+        guard let actualLocale = matchingLocale else {
+            logToFile("Locale \(locale.identifier) not supported. Supported: \(supportedLocales.map { $0.identifier })")
+            errorMessage = "语言 \(locale.identifier) 不被支持"
+            isRunning = false
+            return
+        }
+
+        logToFile("Using locale: \(actualLocale.identifier) (requested: \(locale.identifier))")
+
+        let transcriber = SpeechTranscriber(locale: actualLocale, preset: .progressiveTranscription)
+        self.transcriber = transcriber
+
+        // Create SpeechAnalyzer with the transcriber module
+        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        self.analyzer = analyzer
+
+        isRunning = true
+        errorMessage = nil
+        currentSpeaker = 1
+
+        // Start asset preparation and audio capture
+        await self.startAudioCapture()
     }
 
-    private func startNewRecognitionTask(recognizer: SFSpeechRecognizer) {
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        request.requiresOnDeviceRecognition = false
-        request.taskHint = .dictation
-        recognitionRequest = request
-        isSilenceFinalizing = false
-        lastSavedText = ""
-        lastTextContent = ""
-        lastTextChangeTime = Date()
-        restartDelay = Date()
+    private func startAudioCapture() async {
+        guard let transcriber = self.transcriber, let analyzer = self.analyzer else {
+            logToFile("Missing transcriber or analyzer")
+            errorMessage = "识别器未初始化"
+            isRunning = false
+            return
+        }
 
-        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            Task { @MainActor in
-                guard let self = self else { return }
+        // First, prepare the analyzer with the target audio format
+        // SpeechTranscriber requires 16-bit signed integer PCM at 16kHz
+        guard let targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: 16000,
+            channels: 1,
+            interleaved: false
+        ) else {
+            logToFile("Failed to create target audio format")
+            errorMessage = "音频格式创建失败"
+            isRunning = false
+            return
+        }
 
-                if let result = result {
-                    let rawText = result.bestTranscription.formattedString
-                    let cleaned = self.cleanText(rawText)
+        logToFile("Preparing analyzer...")
+        do {
+            try await analyzer.prepareToAnalyze(in: targetFormat)
+            logToFile("Analyzer prepared successfully")
+        } catch {
+            logToFile("Analyzer prepare error: \(error)")
+            errorMessage = "语音模型未就绪: \(error.localizedDescription)"
+            isRunning = false
+            return
+        }
 
-                    if cleaned != self.lastTextContent {
-                        self.lastTextContent = cleaned
-                        self.lastTextChangeTime = Date()
-                    }
+        let engine = AVAudioEngine()
+        let inputNode = engine.inputNode
+        self.audioEngine = engine
+        self.inputNode = inputNode
 
-                    self.currentText = cleaned
-                    self.restartCount = 0
-                    self.restartBackoff = 0.3
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+        let converter = AVAudioConverter(from: inputFormat, to: targetFormat)
+        guard let converter = converter else {
+            logToFile("Failed to create audio converter")
+            errorMessage = "音频格式转换失败"
+            isRunning = false
+            return
+        }
+        self.converter = converter
 
-                    if let splitSentence = self.checkSentenceSplit(cleaned) {
-                        self.saveSentence(splitSentence)
-                        return
-                    }
+        logToFile("Audio input: \(inputFormat.sampleRate)Hz, \(inputFormat.channelCount)ch → 16000Hz Int16")
 
-                    if cleaned.count >= self.maxSentenceLength && !cleaned.isEmpty {
-                        self.saveSentence(cleaned)
-                        return
-                    }
+        // Start the audio engine
+        do {
+            engine.prepare()
+            try engine.start()
+            logToFile("Audio engine started")
+        } catch {
+            logToFile("Engine start failed: \(error)")
+            errorMessage = "音频引擎启动失败: \(error.localizedDescription)"
+            isRunning = false
+            return
+        }
 
-                    if result.isFinal && !cleaned.isEmpty && cleaned.count > 3 {
-                        self.saveSentence(cleaned)
-                    } else if result.isFinal {
-                        self.recognitionTask = nil
-                        self.recognitionRequest = nil
-                        self.restartDelay = Date()
-                    }
-                }
-
-                if let error = error {
-                    let code = (error as NSError).code
-                    if code != 203 && code != 1110 && code != 216 && code != 301 {
-                        self.logToFile("Error: \(error.localizedDescription) code=\(code)")
-                    }
-                    self.recognitionTask = nil
-                    self.recognitionRequest = nil
-                    self.restartDelay = Date()
+        // Create an async sequence for audio buffers
+        let audioSequence = AsyncStream<AnalyzerInput> { continuation in
+            inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
+                if let converted = self.convertBuffer(buffer, converter: converter, to: targetFormat) {
+                    continuation.yield(AnalyzerInput(buffer: converted))
                 }
             }
+        }
+
+        // Start analyzing audio
+        analyzeTask = Task {
+            do {
+                let lastTime = try await analyzer.analyzeSequence(audioSequence)
+                if let lastTime = lastTime {
+                    try await analyzer.finalizeAndFinish(through: lastTime)
+                }
+            } catch {
+                await MainActor.run {
+                    self.logToFile("Analyze error: \(error)")
+                    self.errorMessage = "识别错误: \(error.localizedDescription)"
+                }
+            }
+        }
+
+        // Start collecting results
+        resultTask = Task {
+            do {
+                for try await result in transcriber.results {
+                    let text = String(result.text.characters)
+                    await MainActor.run {
+                        self.handleResult(text)
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.logToFile("Result error: \(error)")
+                }
+            }
+        }
+
+        logToFile("Transcription running")
+    }
+
+    private func convertBuffer(_ buffer: AVAudioPCMBuffer, converter: AVAudioConverter, to format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let frameCount = AVAudioFrameCount(Double(buffer.frameLength) * format.sampleRate / converter.inputFormat.sampleRate)
+        guard frameCount > 0,
+              let outputBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+            return nil
+        }
+
+        var error: NSError?
+        var inputBuffer = buffer
+        let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+            outStatus.pointee = .haveData
+            return inputBuffer
+        }
+
+        if status == .error || error != nil {
+            return nil
+        }
+        outputBuffer.frameLength = frameCount
+        return outputBuffer
+    }
+
+    private func handleResult(_ text: String) {
+        let cleaned = cleanText(text)
+        guard !cleaned.isEmpty else { return }
+
+        currentText = cleaned
+        logToFile("Result: \"\(cleaned.prefix(80))\"")
+
+        // Check for sentence-ending punctuation
+        if let split = checkSentenceSplit(cleaned) {
+            saveSentence(split)
+        } else if cleaned.count >= 80 {
+            saveSentence(cleaned)
         }
     }
 
     private func cleanText(_ text: String) -> String {
         var words = text.components(separatedBy: " ")
         words.removeAll { fillerWords.contains($0.lowercased()) }
-
         var result = words.joined(separator: " ")
-
         while result.contains("  ") {
             result = result.replacingOccurrences(of: "  ", with: " ")
         }
-
-        let unwanted: Set<Character> = ["\u{FF0C}", "\u{3001}"]
-        if result.count <= 4 && result.allSatisfy({ unwanted.contains($0) || $0.isWhitespace }) {
-            return ""
-        }
-
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func checkSentenceSplit(_ text: String) -> String? {
         guard text.count > 5 else { return nil }
-
         let enders: Set<Character> = ["。", "！", "？", ".", "!", "?", "\n"]
         if let lastChar = text.last, enders.contains(lastChar) {
             return text
         }
-
         for ender in enders {
             if let range = text.range(of: String(ender), options: .backwards) {
                 let beforeEnd = text.distance(from: text.startIndex, to: range.lowerBound)
@@ -306,24 +300,7 @@ final class SpeechRecognizerManager: ObservableObject {
                 }
             }
         }
-
         return nil
-    }
-
-    private func finalizeCurrentSentence(silenceGap: Double) {
-        let text = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, text != lastSavedText else {
-            currentText = ""
-            return
-        }
-
-        if silenceGap > 3.0 {
-            currentSpeaker = currentSpeaker == 1 ? 2 : 1
-            logToFile("Speaker switched to #\(currentSpeaker) (gap=\(String(format: "%.1f", silenceGap))s)")
-        }
-
-        isSilenceFinalizing = true
-        saveSentence(text)
     }
 
     private func saveSentence(_ text: String) {
@@ -332,19 +309,9 @@ final class SpeechRecognizerManager: ObservableObject {
 
         let wordCount = sentence.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.count
         let isCJK = sentence.unicodeScalars.contains { $0.value > 0x3000 }
-        let tooShort = !isCJK && wordCount < minMeaningfulWords && sentence.count < 8
-        let cjkTooShort = isCJK && sentence.count < 4
-
-        if tooShort || cjkTooShort {
-            logToFile("Filtered short: \"\(sentence.prefix(40))\" (\(wordCount) words, \(sentence.count) chars)")
+        if (!isCJK && wordCount < 3 && sentence.count < 10) || (isCJK && sentence.count < 5) {
+            logToFile("Filtered short: \"\(sentence.prefix(40))\"")
             currentText = ""
-            recognitionTask?.cancel()
-            recognitionTask = nil
-            recognitionRequest?.endAudio()
-            recognitionRequest = nil
-            restartCount = 0
-            restartBackoff = 0.3
-            restartDelay = Date()
             return
         }
 
@@ -352,31 +319,37 @@ final class SpeechRecognizerManager: ObservableObject {
         logToFile("Sentence [Speaker \(currentSpeaker)]: \(sentence.prefix(120))")
         onSentenceComplete?(sentence, currentSpeaker)
         currentText = ""
-
-        recognitionTask?.cancel()
-        recognitionTask = nil
-        recognitionRequest?.endAudio()
-        recognitionRequest = nil
-
-        restartCount = 0
-        restartBackoff = 0.3
-        restartDelay = Date()
     }
 
     func stop() {
-        chunkTimer?.invalidate()
-        chunkTimer = nil
+        analyzeTask?.cancel()
+        analyzeTask = nil
+        resultTask?.cancel()
+        resultTask = nil
+
+        if let engine = audioEngine, let node = inputNode {
+            node.removeTap(onBus: 0)
+            engine.stop()
+        }
+        audioEngine = nil
+        inputNode = nil
+        converter = nil
+
+        // Save last text
         if !currentText.isEmpty && currentText.count > 3 {
             saveSentence(currentText)
         }
-        recognitionTask?.cancel()
-        recognitionTask = nil
-        recognitionRequest?.endAudio()
-        recognitionRequest = nil
+
+        analyzer = nil
+        transcriber = nil
         isRunning = false
+        logToFile("Stopped")
     }
 
     func clearText() {
         currentText = ""
     }
+
+    // No-op for compatibility — audio is captured internally now
+    func feedAudioData(_ audioData: AudioData) {}
 }
