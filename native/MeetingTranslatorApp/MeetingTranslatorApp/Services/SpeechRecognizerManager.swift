@@ -280,20 +280,11 @@ final class SpeechRecognizerManager: ObservableObject {
             resultStableCount = 0
         }
 
-        // If this result's time range overlaps with what we already saved,
-        // it's a correction of the same audio — replace, don't duplicate
-        let overlaps = savedSentenceRange != nil && CMTimeRangeGetIntersection(range, otherRange: savedSentenceRange!).duration.value > 0
-
-        if overlaps && !cleaned.isEmpty {
-            // This is a revision of the previously saved sentence
-            replaceLastSentence(cleaned, range: range)
-            return
-        }
-
         // Save when:
         // 1. Result has been stable for N consecutive callbacks, OR
         // 2. Sentence-ending punctuation detected with enough content, OR
         // 3. Text is getting too long
+        // Always check against lastSavedText to avoid duplicates
         if resultStableCount >= stableThreshold {
             if !cleaned.isEmpty && cleaned != lastSavedText {
                 saveSentence(cleaned, range: range)
@@ -308,27 +299,6 @@ final class SpeechRecognizerManager: ObservableObject {
                 saveSentence(cleaned, range: range)
             }
         }
-    }
-
-    private func replaceLastSentence(_ text: String, range: CMTimeRange) {
-        let sentence = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !sentence.isEmpty else { return }
-
-        if !shouldSave(sentence) {
-            return
-        }
-
-        // Only revise if the text actually changed from what we last sent
-        guard sentence != lastSavedText else {
-            currentText = sentence
-            return
-        }
-
-        lastSavedText = sentence
-        savedSentenceRange = range
-        logToFile("Revised: \(sentence.prefix(80))")
-        onSentenceRevise?(sentence, currentSpeaker)
-        currentText = ""
     }
 
     private func cleanText(_ text: String) -> String {
