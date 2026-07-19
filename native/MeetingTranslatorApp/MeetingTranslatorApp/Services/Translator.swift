@@ -59,7 +59,7 @@ final class Translator: ObservableObject {
                     "content": text
                 ]
             ],
-            "temperature": 1
+            "temperature": 0.2
         ]
 
         // Ensure URL ends with /chat/completions

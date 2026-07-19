@@ -31,6 +31,7 @@ struct MainView: View {
     @State private var enableTranslation = false
     @State private var showSettings = false
     @State private var lastTranslatedText: String = ""
+    @State private var translationTasks: [Task<Void, Never>] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -236,7 +237,7 @@ struct MainView: View {
             speechRecognizer.start(locale: locale)
 
             speechRecognizer.onSentenceComplete = { sentence, speaker in
-                Task {
+                let task = Task {
                     if self.enableTranslation {
                         self.translator.logToFile("Translating [Speaker \(speaker)]: \(sentence.prefix(60))")
                         let chinese = await self.translator.translate(sentence) ?? ""
@@ -249,6 +250,7 @@ struct MainView: View {
                     }
                     self.lastTranslatedText = sentence
                 }
+                translationTasks.append(task)
             }
 
             // Note: AudioCaptureManager is no longer needed for speech recognition.
@@ -259,6 +261,10 @@ struct MainView: View {
     }
 
     private func stopCapture() {
+        // Cancel pending translation tasks first to prevent race with final flush
+        translationTasks.forEach { $0.cancel() }
+        translationTasks.removeAll()
+
         speechRecognizer.stop()
         captureManager.isCapturing = false
 

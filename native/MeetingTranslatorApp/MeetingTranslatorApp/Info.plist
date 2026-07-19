@@ -17,12 +17,12 @@
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>26.0</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>MeetingTranslator needs microphone access to transcribe meeting audio.</string>
+    <string>EchoMeet needs microphone access to transcribe meeting audio.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>MeetingTranslator uses speech recognition to transcribe meetings.</string>
+    <string>EchoMeet uses speech recognition to transcribe meetings.</string>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>MeetingTranslator captures system audio to transcribe meeting content.</string>
+    <string>EchoMeet captures system audio to transcribe meeting content.</string>
 </dict>
 </plist>

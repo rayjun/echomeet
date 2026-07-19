@@ -12,7 +12,6 @@ final class SpeechRecognizerManager: ObservableObject {
     @Published var currentSpeaker: Int = 1
 
     var onSentenceComplete: ((String, Int) -> Void)?
-    var onSentenceRevise: ((String, Int) -> Void)?
 
     private var analyzer: SpeechAnalyzer?
     private var transcriber: SpeechTranscriber?
@@ -23,13 +22,7 @@ final class SpeechRecognizerManager: ObservableObject {
     private var converter: AVAudioConverter?
 
     private var lastSavedText: String = ""
-    private var currentTranscript: String = ""
-    private var lastResultText: String = ""
-    private var resultStableCount: Int = 0
-    private var stableThreshold: Int = 3
     private var savedSentenceRange: CMTimeRange?
-    private var lastReviseTime: Date = .distantPast
-    private let reviseThrottle: Double = 1.5
 
     private let fillerWords: Set<String> = [
         "um", "uh", "er", "ah", "hmm", "mm",
@@ -202,8 +195,10 @@ final class SpeechRecognizerManager: ObservableObject {
         }
 
         // Create an async sequence for audio buffers
-        let audioSequence = AsyncStream<AnalyzerInput> { continuation in
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
+        let audioSequence = AsyncStream<AnalyzerInput> { [weak self] continuation in
+            guard let self = self else { return }
+            inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+                guard let self = self else { return }
                 if let converted = self.convertBuffer(buffer, converter: converter, to: targetFormat) {
                     continuation.yield(AnalyzerInput(buffer: converted))
                 }
